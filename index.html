@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Doctor Duty Roster</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#121212',
+                        darkcard: '#1e1e1e',
+                        accent: '#8b5cf6',
+                    },
+                    fontFamily: {
+                        date: ['"Source Code Pro"', 'monospace'],
+                        name: ['"PT Sans Narrow"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&family=Source+Code+Pro:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Export Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
+        .no-select { user-select: none; -webkit-user-select: none; }
+        
+        .calendar-cell { min-height: 100px; transition: background-color 0.1s; }
+        @media (min-width: 768px) { .calendar-cell { min-height: 130px; } }
+
+        .day-sun { background-color: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); }
+        .day-mwf { background-color: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.15); }
+        .dark .day-sun { background-color: rgba(239, 68, 68, 0.2); }
+        .dark .day-mwf { background-color: rgba(59, 130, 246, 0.15); }
+        .day-today { box-shadow: inset 0 0 0 2px #f59e0b; }
+        .name-badge { word-break: break-word; overflow-wrap: break-word; white-space: normal; line-height: 1.1; }
+        .tool-selected { box-shadow: 0 0 0 3px #3b82f6; transform: scale(1.05); }
+
+        /* Locked State Visuals */
+        .locked-mode .edit-control { opacity: 0.5; pointer-events: none; filter: grayscale(1); }
+        .locked-mode .calendar-cell { cursor: default !important; }
+
+        /* Export Container */
+        #export-container { position: fixed; top: -9999px; left: -9999px; width: 1200px; z-index: -1; background: white; color: black; font-family: sans-serif; }
+        #export-container .calendar-cell { height: auto; min-height: 140px; border: 1px solid #ccc; }
+        #export-container .day-sun { background-color: #fee2e2 !important; }
+        #export-container .day-mwf { background-color: #eff6ff !important; }
+        #export-container .bg-white { background-color: white !important; }
+        #export-container h2 { color: black !important; text-shadow: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-darkbg text-gray-800 dark:text-gray-200 transition-colors duration-300 min-h-screen font-name overflow-x-hidden pb-40 locked-mode">
+
+    <!-- Header -->
+    <div class="fixed top-0 left-0 right-0 z-50 bg-white/90 dark:bg-darkcard/90 backdrop-blur shadow-md px-4 py-2 flex justify-between items-center no-export">
+        <div class="flex items-center gap-3">
+            <h1 class="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-500">
+                <i class="fa-solid fa-user-doctor mr-2"></i>RosterGen
+            </h1>
+            <!-- Lock Toggle -->
+            <button onclick="window.toggleEditMode()" id="lock-btn" class="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-all">
+                <i class="fa-solid fa-lock"></i> <span>View Only</span>
+            </button>
+        </div>
+        <div class="flex gap-3">
+            <div id="sync-status" class="text-[10px] text-gray-400 flex items-center">Starting...</div>
+            <button onclick="window.toggleTheme()" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center transition hover:scale-110">
+                <i class="fa-solid fa-moon dark:hidden text-gray-700"></i>
+                <i class="fa-solid fa-sun hidden dark:block text-yellow-400"></i>
+            </button>
+            <button onclick="window.changeCycle(-1)" class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center hover:bg-blue-200"><i class="fa-solid fa-chevron-left"></i></button>
+            <button onclick="window.changeCycle(1)" class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 flex items-center justify-center hover:bg-blue-200"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+    </div>
+
+    <!-- Main View -->
+    <div class="pt-20 px-2 md:px-4 max-w-5xl mx-auto">
+        
+        <div id="roster-view" class="bg-white dark:bg-[#1a1a1a] rounded-xl shadow-lg border border-gray-200 dark:border-gray-800 overflow-hidden mb-6 relative">
+            <div class="p-4 text-center bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white">
+                <h2 id="month-title" class="text-3xl font-bold tracking-wider drop-shadow-md">...</h2>
+            </div>
+            <div class="p-1 md:p-2 bg-white dark:bg-[#1a1a1a]">
+                <div id="week-headers" class="grid grid-cols-7 mb-1 text-center font-bold text-xs uppercase tracking-widest text-gray-500 dark:text-gray-400"></div>
+                <div id="calendar-days" class="grid grid-cols-7 gap-0.5 md:gap-1 text-center no-select"></div>
+            </div>
+        </div>
+
+        <!-- Palette (Hidden in Locked Mode) -->
+        <div class="no-export mb-6 edit-control transition-opacity duration-300">
+            <div class="flex items-center justify-between mb-2 px-1">
+                <h3 class="text-xs font-bold uppercase text-gray-500 tracking-wider">Quick Assign</h3>
+                <span class="text-[10px] text-gray-400">Unlock to edit</span>
+            </div>
+            <div class="flex gap-3 overflow-x-auto pb-4 px-1" id="doctor-palette">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="no-export bg-white dark:bg-darkcard p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-6">
+            <h3 class="text-sm font-bold uppercase text-gray-500 tracking-wider mb-3">Statistics</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4" id="category-stats"></div>
+            <div class="pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <div id="week-stats" class="text-xs font-mono text-gray-600 dark:text-gray-400 leading-relaxed"></div>
+                <div id="empty-stats" class="text-xs font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Export Container -->
+    <div id="export-container">
+        <div class="p-8">
+            <h1 id="export-title" class="text-4xl font-bold text-center mb-6 border-b-2 border-black pb-4 uppercase tracking-widest">Duty Roster</h1>
+            <div id="export-grid-headers" class="grid grid-cols-7 mb-2 text-center font-bold text-sm uppercase"></div>
+            <div id="export-grid-days" class="grid grid-cols-7 gap-1 text-center bg-gray-200 border border-gray-300"></div>
+            <div class="mt-4 text-right text-sm text-gray-500">Generated by RosterGen</div>
+        </div>
+    </div>
+
+    <!-- Bottom Tools -->
+    <div class="fixed bottom-0 left-0 right-0 bg-white dark:bg-darkcard border-t border-gray-200 dark:border-gray-700 p-3 z-40 no-export flex justify-around items-center safe-area-pb shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+        <button onclick="window.toggleEditDoctors()" class="flex flex-col items-center text-gray-600 dark:text-gray-300 hover:text-blue-500 edit-control">
+            <i class="fa-solid fa-user-doctor text-lg mb-1"></i>
+            <span class="text-[10px]">Doctors</span>
+        </button>
+        <button onclick="window.exportCSV()" class="flex flex-col items-center text-green-600 hover:text-green-500">
+            <i class="fa-solid fa-file-csv text-lg mb-1"></i>
+            <span class="text-[10px]">CSV</span>
+        </button>
+        <div class="h-8 w-px bg-gray-300 dark:bg-gray-600 mx-2"></div>
+        <button onclick="window.exportImage('png')" class="flex flex-col items-center text-blue-500 hover:text-blue-400">
+            <i class="fa-solid fa-image text-lg mb-1"></i>
+            <span class="text-[10px]">PNG</span>
+        </button>
+        <button onclick="window.exportPDF()" class="flex flex-col items-center text-pink-500 hover:text-pink-400">
+            <i class="fa-solid fa-file-pdf text-lg mb-1"></i>
+            <span class="text-[10px]">PDF</span>
+        </button>
+    </div>
+
+    <!-- Modals -->
+    <!-- Day Editor -->
+    <div id="day-editor" class="hidden fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
+        <div class="bg-white dark:bg-darkcard w-full md:w-[400px] md:rounded-xl rounded-t-xl p-0 shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800 md:rounded-t-xl">
+                <div><h3 class="font-bold text-lg" id="editor-date-title">Date</h3><p class="text-xs text-gray-500" id="editor-day-subtitle">Day</p></div>
+                <button onclick="window.closeDayEditor()" class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overflow-y-auto p-4 space-y-4">
+                <div><label class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Note</label><input type="text" id="editor-note-input" class="w-full bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-3 py-2 text-sm"></div>
+                <div class="bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800/50"><h4 class="text-xs font-bold uppercase text-blue-600 dark:text-blue-400 mb-2">Faculty</h4><div id="list-faculty" class="space-y-1"></div></div>
+                <div class="bg-green-50/50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100 dark:border-green-800/50"><h4 class="text-xs font-bold uppercase text-green-600 dark:text-green-400 mb-2">Senior PG</h4><div id="list-senior_pg" class="space-y-1"></div></div>
+                <div class="bg-purple-50/50 dark:bg-purple-900/20 p-3 rounded-lg border border-purple-100 dark:border-purple-800/50"><h4 class="text-xs font-bold uppercase text-purple-600 dark:text-purple-400 mb-2">Junior PG</h4><div id="list-junior_pg" class="space-y-1"></div></div>
+            </div>
+            <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800 md:rounded-b-xl">
+                 <span class="text-xs text-gray-400" id="editor-count">0/3 Selected</span>
+                 <button onclick="window.saveDayEditor()" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Doc Manager -->
+    <div id="doctor-manager" class="hidden fixed inset-0 z-[90] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-darkcard p-6 rounded-xl shadow-2xl w-full max-w-lg h-3/4 flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-200 dark:border-gray-700 pb-3">
+                <h3 class="text-lg font-bold">Manage Doctors</h3>
+                <button onclick="window.toggleEditDoctors()" class="text-gray-500 hover:text-white"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="overflow-y-auto flex-grow pr-2" id="doctor-list-editor"></div>
+            <div class="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-end items-center">
+                <button onclick="window.saveDoctors()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded shadow text-sm font-bold">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts: Firebase & Logic -->
+    <script type="module">
+        // Import from CDN URLs (Browser Compatible)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // YOUR SPECIFIC CONFIG (Updated with your details)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCwPvJoEU4P7hsTjMOnjFdjirlOXUg1FTA",
+            authDomain: "dutyroster1-92765.firebaseapp.com",
+            projectId: "dutyroster1-92765",
+            storageBucket: "dutyroster1-92765.firebasestorage.app",
+            messagingSenderId: "80624615508",
+            appId: "1:80624615508:web:39e018bb5ef0debac82dc1",
+            measurementId: "G-YGWPXTK0TD"
+        };
+
+        // Initialize Firebase
+        let db;
+        let rosterRef;
+        let isOnline = false;
+
+        const CATEGORIES = {
+            'faculty': { label: 'Faculty', rank: 1, color: '#FFB3BA' }, 
+            'senior_pg': { label: 'Senior PG', rank: 2, color: '#BAFFC9' },
+            'junior_pg': { label: 'Junior PG', rank: 3, color: '#BAE1FF' }
+        };
+
+        const defaultDoctors = [
+            { id: 1, name: "Dr. Smith", category: "faculty", color: "#FFB3BA" },
+            { id: 2, name: "Dr. Lee", category: "junior_pg", color: "#BAE1FF" },
+        ];
+
+        let state = {
+            currentDate: new Date(),
+            startDay: 26,
+            doctors: defaultDoctors,
+            assignments: {},
+            notes: {},
+            settings: { weekStartSun: false },
+            selectedTool: null,
+            isDragging: false,
+            editingDate: null,
+            isEditMode: false
+        };
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                rosterRef = doc(db, "rosters", "main_roster");
+                isOnline = true;
+                
+                // Real-time Listener
+                onSnapshot(rosterRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        state.doctors = data.doctors || defaultDoctors;
+                        state.assignments = data.assignments || {};
+                        state.notes = data.notes || {};
+                        state.settings = data.settings || state.settings;
+                        state.startDay = data.startDay || 26;
+                        document.getElementById('sync-status').innerHTML = '<span class="text-green-500"><i class="fa-solid fa-circle text-[6px]"></i> Live</span>';
+                        renderCalendar();
+                    } else {
+                        // Create initial if not exists
+                        saveToCloud();
+                        renderCalendar();
+                    }
+                }, (error) => {
+                    console.error("Sync error:", error);
+                    let msg = "Error";
+                    if(error.code === 'permission-denied') msg = "Database Locked (Check Rules)";
+                    document.getElementById('sync-status').innerText = msg;
+                });
+            } catch (e) {
+                console.error("Firebase Init Error", e);
+                document.getElementById('sync-status').innerText = "Init Failed";
+                renderCalendar(); // Render offline mode at least
+            }
+        }
+
+        async function saveToCloud() {
+            if(!isOnline) return;
+            try {
+                await setDoc(rosterRef, {
+                    doctors: state.doctors,
+                    assignments: state.assignments,
+                    notes: state.notes,
+                    settings: state.settings,
+                    startDay: state.startDay,
+                    lastUpdated: new Date().toISOString()
+                });
+                document.getElementById('sync-status').innerHTML = '<span class="text-green-500 animate-pulse">Saving...</span>';
+                setTimeout(() => document.getElementById('sync-status').innerHTML = '<span class="text-green-500"><i class="fa-solid fa-circle text-[6px]"></i> Live</span>', 1000);
+            } catch(e) {
+                console.error("Save failed", e);
+                document.getElementById('sync-status').innerText = "Save Failed";
+            }
+        }
+
+        // --- UI Functions ---
+
+        window.toggleEditMode = function() {
+            if (state.isEditMode) {
+                state.isEditMode = false;
+                state.selectedTool = null;
+                document.body.classList.add('locked-mode');
+                const btn = document.getElementById('lock-btn');
+                btn.className = "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1";
+                btn.innerHTML = '<i class="fa-solid fa-lock"></i> <span>View Only</span>';
+                renderPalette();
+            } else {
+                const code = prompt("Enter passcode to Edit:");
+                if (code === "2613") {
+                    state.isEditMode = true;
+                    document.body.classList.remove('locked-mode');
+                    const btn = document.getElementById('lock-btn');
+                    btn.className = "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1";
+                    btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> <span>Unlocked</span>';
+                    renderPalette();
+                } else {
+                    alert("Incorrect passcode");
+                }
+            }
+        }
+
+        function getRosterCycle(refDate) {
+            let startMonth = refDate.getMonth();
+            let startYear = refDate.getFullYear();
+            if (refDate.getDate() < state.startDay) {
+                startMonth--;
+                if (startMonth < 0) { startMonth = 11; startYear--; }
+            }
+            const startDate = new Date(startYear, startMonth, state.startDay);
+            let endMonth = startMonth + 1;
+            let endYear = startYear;
+            if (endMonth > 11) { endMonth = 0; endYear++; }
+            const endDate = new Date(endYear, endMonth, state.startDay - 1);
+            return { startDate, endDate };
+        }
+
+        function generateDates() {
+            const { startDate, endDate } = getRosterCycle(state.currentDate);
+            const dates = [];
+            let curr = new Date(startDate);
+            while (curr <= endDate) {
+                dates.push(new Date(curr));
+                curr.setDate(curr.getDate() + 1);
+            }
+            return dates;
+        }
+
+        function getAssignmentsForDate(dateKey) {
+            const ids = state.assignments[dateKey] || [];
+            let docs = ids.map(id => state.doctors.find(d => d.id === id)).filter(Boolean);
+            docs.sort((a, b) => (CATEGORIES[a.category]?.rank || 99) - (CATEGORIES[b.category]?.rank || 99));
+            return docs;
+        }
+
+        function renderCalendar() {
+            const { startDate, endDate } = getRosterCycle(state.currentDate);
+            const title = `${startDate.toLocaleString('default', {month:'short'})} - ${endDate.toLocaleString('default', {month:'short'})} ${endDate.getFullYear()}`;
+            document.getElementById('month-title').innerText = title;
+            document.getElementById('export-title').innerText = title;
+
+            renderGrid('calendar-days', 'week-headers', false);
+            renderStats();
+            renderPalette();
+        }
+
+        function renderGrid(containerId, headerId, isExport) {
+            const grid = document.getElementById(containerId);
+            const headers = document.getElementById(headerId);
+            grid.innerHTML = ''; headers.innerHTML = '';
+
+            const dates = generateDates();
+            const days = state.settings.weekStartSun ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            days.forEach(d => {
+                const el = document.createElement('div'); el.innerText = d;
+                if(d === 'Sun') el.classList.add('text-red-500');
+                headers.appendChild(el);
+            });
+
+            let firstDay = dates[0].getDay();
+            let startIdx = state.settings.weekStartSun ? 0 : 1;
+            let offset = firstDay - startIdx;
+            if (offset < 0) offset += 7;
+            for(let i=0; i<offset; i++) grid.appendChild(document.createElement('div'));
+
+            const todayStr = new Date().toDateString();
+
+            dates.forEach(date => {
+                const dateKey = date.toISOString().split('T')[0];
+                const dayOfWeek = date.getDay();
+                const cell = document.createElement('div');
+                cell.className = isExport ? 'calendar-cell relative p-1 bg-white flex flex-col items-center justify-start overflow-hidden' : 'calendar-cell relative rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col items-center justify-start p-0.5 cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 active:scale-95 touch-none';
+                cell.dataset.date = dateKey;
+
+                if (dayOfWeek === 0) cell.classList.add('day-sun');
+                if ([1, 3, 5].includes(dayOfWeek)) cell.classList.add('day-mwf');
+                else if (dayOfWeek !== 0 && !isExport) cell.classList.add('bg-white', 'dark:bg-darkcard');
+                if (!isExport && date.toDateString() === todayStr) cell.classList.add('day-today');
+
+                const num = document.createElement('div');
+                num.className = `font-date text-lg leading-none mt-1 mb-1 ${dayOfWeek === 0 ? 'text-red-500' : 'text-gray-700 dark:text-gray-300'}`;
+                num.innerText = date.getDate();
+                cell.appendChild(num);
+
+                const docs = getAssignmentsForDate(dateKey);
+                const docContainer = document.createElement('div');
+                docContainer.className = 'w-full flex flex-col gap-0.5 items-center justify-center flex-grow';
+                docs.forEach(doc => {
+                    const badge = document.createElement('div');
+                    badge.className = 'w-full text-center text-[10px] md:text-xs font-name font-bold px-1 rounded shadow-sm text-gray-800 name-badge';
+                    badge.style.backgroundColor = doc.color;
+                    badge.innerText = doc.name;
+                    docContainer.appendChild(badge);
+                });
+                cell.appendChild(docContainer);
+
+                if(state.notes[dateKey]) {
+                    const noteEl = document.createElement('div');
+                    noteEl.className = "w-full text-center text-[9px] text-gray-400 dark:text-gray-500 leading-tight mt-1 mb-0.5 px-1 truncate opacity-70 font-sans";
+                    noteEl.innerText = state.notes[dateKey];
+                    cell.appendChild(noteEl);
+                }
+
+                if (!isExport) addCellInteraction(cell, dateKey, date);
+                grid.appendChild(cell);
+            });
+        }
+
+        function addCellInteraction(cell, dateKey, dateObj) {
+            cell.addEventListener('touchstart', (e) => {
+                if (state.isEditMode && state.selectedTool) { state.isDragging = true; applyTool(dateKey); }
+            }, {passive: false});
+            cell.addEventListener('mousedown', (e) => {
+                if (state.isEditMode && state.selectedTool) { state.isDragging = true; applyTool(dateKey); }
+            });
+            cell.addEventListener('click', (e) => {
+                if (!state.isEditMode) return;
+                if (!state.selectedTool) window.openDayEditor(dateKey, dateObj);
+            });
+        }
+        
+        window.addEventListener('touchmove', (e) => {
+            if (state.isEditMode && state.isDragging && state.selectedTool) {
+                const touch = e.touches[0];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                const cell = target?.closest('.calendar-cell');
+                if (cell && cell.dataset.date) { e.preventDefault(); applyTool(cell.dataset.date); }
+            }
+        }, {passive: false});
+        window.addEventListener('mouseup', () => state.isDragging = false);
+        window.addEventListener('touchend', () => state.isDragging = false);
+
+        window.selectTool = function(id) {
+            state.selectedTool = state.selectedTool === id ? null : id;
+            renderPalette();
+        }
+
+        function applyTool(dateKey) {
+            let current = state.assignments[dateKey] || [];
+            if (state.selectedTool === 'eraser') {
+                if(current.length > 0) { state.assignments[dateKey] = []; saveToCloud(); }
+            } else {
+                const docId = state.selectedTool;
+                if (!current.includes(docId) && current.length < 3) {
+                    current.push(docId);
+                    state.assignments[dateKey] = current;
+                    saveToCloud();
+                }
+            }
+        }
+
+        function renderPalette() {
+            const container = document.getElementById('doctor-palette');
+            container.innerHTML = '';
+            
+            const hand = document.createElement('div');
+            hand.onclick = () => window.selectTool(null);
+            hand.className = `tool-item flex-shrink-0 w-14 h-14 rounded-lg bg-gray-100 dark:bg-gray-800 border-2 ${state.selectedTool === null ? 'border-blue-500 tool-selected' : 'border-gray-300 dark:border-gray-600'} flex flex-col items-center justify-center cursor-pointer transition`;
+            hand.innerHTML = '<i class="fa-solid fa-hand-pointer text-xl text-gray-500"></i><span class="text-[10px] font-bold mt-1">Edit/Tap</span>';
+            container.appendChild(hand);
+
+            const eraser = document.createElement('div');
+            eraser.onclick = () => window.selectTool('eraser');
+            eraser.className = `tool-item flex-shrink-0 w-14 h-14 rounded-lg bg-red-50 dark:bg-red-900/20 border-2 ${state.selectedTool === 'eraser' ? 'tool-selected' : 'border-red-200 dark:border-red-900'} flex flex-col items-center justify-center cursor-pointer transition`;
+            eraser.innerHTML = '<i class="fa-solid fa-eraser text-xl text-red-500"></i><span class="text-[10px] font-bold mt-1 text-red-500">Clear</span>';
+            container.appendChild(eraser);
+
+            state.doctors.forEach(doc => {
+                const el = document.createElement('div');
+                el.className = `tool-item flex-shrink-0 w-14 h-14 rounded-lg flex flex-col items-center justify-center cursor-pointer transition relative group ${state.selectedTool === doc.id ? 'tool-selected' : ''}`;
+                el.style.backgroundColor = doc.color;
+                el.onclick = () => window.selectTool(doc.id);
+                el.innerHTML = `<div class="font-name font-bold text-[10px] text-center text-gray-800 leading-tight px-1 break-words w-full name-badge">${doc.name}</div>`;
+                container.appendChild(el);
+            });
+        }
+
+        function renderStats() {
+            const dates = generateDates();
+            const counts = {}; const sunCounts = {}; let emptyCount = 0;
+            const dayDist = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0};
+            state.doctors.forEach(d => { counts[d.id] = 0; sunCounts[d.id] = 0; });
+            dates.forEach(d => {
+                const key = d.toISOString().split('T')[0];
+                const day = d.getDay();
+                dayDist[day]++;
+                const assigned = state.assignments[key] || [];
+                if(assigned.length === 0) emptyCount++;
+                assigned.forEach(id => { 
+                    if(counts[id] !== undefined) counts[id]++;
+                    if(day === 0 && sunCounts[id] !== undefined) sunCounts[id]++;
+                });
+            });
+
+            const catContainer = document.getElementById('category-stats');
+            catContainer.innerHTML = '';
+            ['faculty', 'senior_pg', 'junior_pg'].forEach(catKey => {
+                const catDocs = state.doctors.filter(d => d.category === catKey);
+                if(catDocs.length === 0) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = "bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-100 dark:border-gray-700";
+                let html = `<h4 class="text-xs font-bold uppercase text-gray-500 mb-2 border-b border-gray-200 dark:border-gray-600 pb-1">${CATEGORIES[catKey].label}</h4><div class="space-y-1">`;
+                catDocs.forEach(doc => {
+                    if(counts[doc.id] > 0) {
+                        const sunText = sunCounts[doc.id] > 0 ? `<span class="text-[10px] text-gray-400 ml-1">(${sunCounts[doc.id]} Sun)</span>` : '';
+                        html += `<div class="flex justify-between text-xs items-center"><span class="flex items-center gap-2"><div class="w-2 h-2 rounded-full" style="background-color:${doc.color}"></div>${doc.name}</span><span class="font-bold bg-gray-200 dark:bg-gray-700 px-1.5 rounded">${counts[doc.id]} ${sunText}</span></div>`;
+                    }
+                });
+                html += '</div>';
+                wrapper.innerHTML = html;
+                catContainer.appendChild(wrapper);
+            });
+
+            document.getElementById('empty-stats').innerText = `Unassigned: ${emptyCount}/${dates.length}`;
+            let dayStr = "";
+            ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach((n,i) => {
+                if(dayDist[i] > 0) dayStr += `<span class="mr-3 text-gray-500">${n}: <b class="text-gray-700 dark:text-gray-300">${dayDist[i]}</b></span>`;
+            });
+            document.getElementById('week-stats').innerHTML = dayStr;
+        }
+
+        window.openDayEditor = function(dateKey, dateObj) {
+            state.editingDate = dateKey;
+            const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+            const prettyDate = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+            document.getElementById('editor-date-title').innerText = prettyDate;
+            document.getElementById('editor-day-subtitle').innerText = dayName;
+            document.getElementById('editor-note-input').value = state.notes[dateKey] || "";
+            const assignedIds = state.assignments[dateKey] || [];
+            ['faculty', 'senior_pg', 'junior_pg'].forEach(cat => {
+                const container = document.getElementById(`list-${cat}`);
+                container.innerHTML = '';
+                state.doctors.filter(d => d.category === cat).forEach(doc => {
+                    const isSelected = assignedIds.includes(doc.id);
+                    const btn = document.createElement('div');
+                    btn.className = `flex items-center justify-between p-2 rounded cursor-pointer border transition ${isSelected ? 'bg-blue-100 dark:bg-blue-900 border-blue-300 dark:border-blue-600' : 'bg-white dark:bg-gray-800 border-transparent hover:bg-gray-50 dark:hover:bg-gray-700'}`;
+                    btn.onclick = () => window.toggleDocInEditor(doc.id);
+                    btn.innerHTML = `<div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full" style="background-color: ${doc.color}"></div><span class="text-sm font-medium">${doc.name}</span></div>${isSelected ? '<i class="fa-solid fa-check text-blue-600"></i>' : ''}`;
+                    container.appendChild(btn);
+                });
+            });
+            document.getElementById('editor-count').innerText = `${assignedIds.length}/3 Selected`;
+            document.getElementById('day-editor').classList.remove('hidden');
+        }
+
+        window.toggleDocInEditor = function(docId) {
+            const dateKey = state.editingDate;
+            let current = state.assignments[dateKey] || [];
+            if (current.includes(docId)) current = current.filter(id => id !== docId);
+            else { if (current.length >= 3) { alert("Max 3 doctors per date."); return; } current.push(docId); }
+            state.assignments[dateKey] = current;
+            saveToCloud(); 
+            window.openDayEditor(dateKey, new Date(dateKey));
+        }
+
+        window.saveDayEditor = function() {
+            const note = document.getElementById('editor-note-input').value.trim();
+            if(note) state.notes[state.editingDate] = note; else delete state.notes[state.editingDate];
+            saveToCloud();
+            document.getElementById('day-editor').classList.add('hidden');
+        }
+        window.closeDayEditor = function() { document.getElementById('day-editor').classList.add('hidden'); }
+
+        window.toggleEditDoctors = function() {
+            if(!state.isEditMode) return alert("Unlock to edit.");
+            const m = document.getElementById('doctor-manager');
+            m.classList.toggle('hidden');
+            if(!m.classList.contains('hidden')) renderDoctorInputs();
+        }
+
+        function renderDoctorInputs() {
+            const list = document.getElementById('doctor-list-editor'); list.innerHTML = '';
+            const grouped = { 'faculty': [], 'senior_pg': [], 'junior_pg': [] };
+            state.doctors.forEach(d => grouped[d.category]?.push(d));
+            ['faculty', 'senior_pg', 'junior_pg'].forEach(cat => {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = "mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden";
+                groupDiv.innerHTML = `<div class="bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-bold uppercase text-gray-500 flex justify-between items-center"><span>${CATEGORIES[cat].label}</span><button onclick="window.addDoctor('${cat}')" class="text-blue-600 hover:text-blue-800 bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded transition"><i class="fa-solid fa-plus"></i></button></div>`;
+                const contentDiv = document.createElement('div'); contentDiv.className = "p-2 bg-gray-50 dark:bg-gray-900 space-y-2";
+                if(grouped[cat].length === 0) contentDiv.innerHTML = `<div class="text-center text-xs text-gray-400 italic py-1">No doctors</div>`;
+                grouped[cat].forEach(doc => {
+                    const row = document.createElement('div'); row.className = "flex gap-2 items-center";
+                    row.innerHTML = `<input type="color" value="${doc.color}" class="w-8 h-8 rounded cursor-pointer border-none bg-transparent doc-color" data-id="${doc.id}"><input type="text" value="${doc.name}" class="flex-grow bg-white dark:bg-black border border-gray-300 dark:border-gray-700 rounded px-2 py-1 text-sm doc-name" data-id="${doc.id}"><button onclick="window.deleteDoc(${doc.id})" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-trash"></i></button>`;
+                    contentDiv.appendChild(row);
+                });
+                groupDiv.appendChild(contentDiv); list.appendChild(groupDiv);
+            });
+        }
+
+        window.addDoctor = function(category) {
+            const h = Math.floor(Math.random() * 360);
+            const l = 0.85, s = 0.7;
+            const a = s * Math.min(l, 1 - l) / 100;
+            const f = n => { const k = (n + h / 30) % 12; const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1); return Math.round(255 * color).toString(16).padStart(2, '0'); };
+            const hex = `#${f(0)}${f(8)}${f(4)}`;
+            state.doctors.push({ id: Date.now(), name: "New Doctor", category: category, color: hex });
+            renderDoctorInputs();
+        }
+
+        window.deleteDoc = function(id) { if(confirm("Delete doctor?")) { state.doctors = state.doctors.filter(d => d.id !== id); renderDoctorInputs(); } }
+        window.saveDoctors = function() {
+            document.querySelectorAll('.doc-name').forEach(input => {
+                const id = parseInt(input.dataset.id); const doc = state.doctors.find(d => d.id === id);
+                if(doc) { doc.name = input.value; doc.color = document.querySelector(`.doc-color[data-id="${id}"]`).value; }
+            });
+            saveToCloud(); window.toggleEditDoctors();
+        }
+
+        window.exportCSV = function() {
+            const dates = generateDates();
+            let csvContent = "data:text/csv;charset=utf-8,S.No,Date,Day,Faculty,Senior PG,Junior PG,Note\n";
+            dates.forEach((date, index) => {
+                const dateKey = date.toISOString().split('T')[0];
+                const assignments = getAssignmentsForDate(dateKey);
+                const note = state.notes[dateKey] || "";
+                const f = assignments.filter(d => d.category === 'faculty').map(d => d.name).join('; ');
+                const s = assignments.filter(d => d.category === 'senior_pg').map(d => d.name).join('; ');
+                const j = assignments.filter(d => d.category === 'junior_pg').map(d => d.name).join('; ');
+                csvContent += `${index+1},${date.toLocaleDateString()},${date.toLocaleDateString('en-US', {weekday:'short'})},"${f}","${s}","${j}","${note}"\n`;
+            });
+            const link = document.createElement("a"); link.href = encodeURI(csvContent); link.download = "roster.csv";
+            document.body.appendChild(link); link.click(); link.remove();
+        }
+
+        window.exportImage = async function(type) {
+            const hiddenContainer = document.getElementById('export-container');
+            renderGrid('export-grid-days', 'export-grid-headers', true);
+            document.getElementById('export-title').innerText = document.getElementById('month-title').innerText;
+            try { await new Promise(r => setTimeout(r, 100)); const canvas = await html2canvas(hiddenContainer, {scale: 2, backgroundColor: "#ffffff", windowWidth: 1200}); const link = document.createElement('a'); link.download = `roster.${type}`; link.href = canvas.toDataURL(`image/${type === 'jpg' ? 'jpeg' : 'png'}`); link.click(); } catch(e) { alert("Export failed"); }
+        }
+
+        window.exportPDF = async function() {
+            const hiddenContainer = document.getElementById('export-container');
+            renderGrid('export-grid-days', 'export-grid-headers', true);
+            await new Promise(r => setTimeout(r, 100));
+            const canvas = await html2canvas(hiddenContainer, { scale: 2, backgroundColor: "#ffffff" });
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
+            const imgProps = pdf.getImageProperties(canvas.toDataURL('image/png'));
+            const pdfW = pdf.internal.pageSize.getWidth(); const pdfH = pdf.internal.pageSize.getHeight();
+            const ratio = imgProps.width / imgProps.height;
+            let w = pdfW - 20; let h = w / ratio;
+            if (h > pdfH - 20) { h = pdfH - 20; w = h * ratio; }
+            pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 10, 10, w, h);
+            pdf.save("roster.pdf");
+        }
+
+        window.toggleTheme = function() { document.documentElement.classList.toggle('dark'); }
+        window.changeCycle = function(dir) { const d = new Date(state.currentDate); d.setMonth(d.getMonth() + dir); state.currentDate = d; renderCalendar(); }
+
+        // Start App
+        init();
+    </script>
+</body>
+</html>
+
+
